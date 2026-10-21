@@ -358,13 +358,99 @@ def get_chromedriver_binary() -> Optional[str]:
 
 
 def kill_zombie_browsers():
-    """Clean up orphaned chromium and chromedriver processes to prevent memory leaks on Termux."""
+    """Clean up orphaned chromium and chromedriver processes to prevent memory leaks and port collisions."""
     try:
         if IS_ANDROID or sys.platform.startswith("linux"):
-            subprocess.run(["pkill", "-9", "-f", "chromedriver"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(["pkill", "-9", "-f", "chromium-browser"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            for proc_name in ("chromedriver", "chromium-browser", "chromium", "chrome"):
+                try:
+                    subprocess.run(["pkill", "-9", "-f", proc_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                except Exception:
+                    pass
     except Exception:
         pass
+
+
+def create_resilient_driver(options: Any, headless: bool = True) -> Any:
+    """
+    Creates and launches a Selenium WebDriver instance with multi-tier retry,
+    dynamic port binding (port=0), environment sanitization (TMPDIR), and automatic crash recovery.
+    """
+    from selenium import webdriver
+    from selenium.webdriver.chrome.service import Service
+
+    # Termux Android TMPDIR safety
+    if IS_ANDROID or os.path.exists("/data/data/com.termux"):
+        termux_tmp = "/data/data/com.termux/files/usr/tmp"
+        os.environ["TMPDIR"] = termux_tmp
+        try:
+            os.makedirs(termux_tmp, exist_ok=True)
+        except Exception:
+            pass
+
+    chrome_bin = get_chromium_binary()
+    chromedriver_bin = get_chromedriver_binary()
+
+    if chrome_bin and (not hasattr(options, "binary_location") or not options.binary_location):
+        options.binary_location = chrome_bin
+
+    # Ensure baseline sandbox/shm/port flags
+    baseline_args = [
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--remote-debugging-port=0"
+    ]
+    for arg in baseline_args:
+        if arg not in options.arguments:
+            options.add_argument(arg)
+
+    last_exc = None
+
+    # Tier 1: Launch with dynamic port (port=0) and silenced log output
+    try:
+        service = Service(executable_path=chromedriver_bin, port=0, log_output=subprocess.DEVNULL) if chromedriver_bin else Service(port=0, log_output=subprocess.DEVNULL)
+        driver = webdriver.Chrome(service=service, options=options)
+        return driver
+    except Exception as e:
+        last_exc = e
+        write_runtime_log("DRIVER", "RETRY", f"Tier 1 ChromeDriver launch failed: {e}. Executing zombie cleanup and fallback tier...")
+
+    # Tier 2: Kill zombies, switch headless mode, and retry
+    kill_zombie_browsers()
+    time.sleep(0.5)
+
+    try:
+        # If --headless=new failed on older kernel or specialized driver, fallback to classic --headless or adjust flags
+        opts_t2 = options
+        if "--headless=new" in opts_t2.arguments:
+            opts_t2.arguments.remove("--headless=new")
+            opts_t2.add_argument("--headless")
+        if "--single-process" not in opts_t2.arguments and (IS_ANDROID or os.path.exists("/data/data/com.termux")):
+            opts_t2.add_argument("--single-process")
+        if "--disable-setuid-sandbox" not in opts_t2.arguments:
+            opts_t2.add_argument("--disable-setuid-sandbox")
+
+        service = Service(executable_path=chromedriver_bin, port=0, log_output=subprocess.DEVNULL) if chromedriver_bin else Service(port=0, log_output=subprocess.DEVNULL)
+        driver = webdriver.Chrome(service=service, options=opts_t2)
+        return driver
+    except Exception as e:
+        last_exc = e
+        write_runtime_log("DRIVER", "RETRY", f"Tier 2 ChromeDriver launch failed: {e}. Trying system PATH fallback...")
+
+    # Tier 3: Launch without explicit chromedriver_bin path (let Selenium / Selenium Manager resolve)
+    try:
+        service = Service(port=0, log_output=subprocess.DEVNULL)
+        driver = webdriver.Chrome(service=service, options=options)
+        return driver
+    except Exception as e:
+        last_exc = e
+
+    err_msg = (
+        f"Chromium/ChromeDriver failed to launch across all 3 resilience tiers.\n"
+        f"Details: {last_exc}\n"
+        f"Hint for Termux/Linux: Run 'fbacc doctor' to reinstall chromium or ensure x11/tur-repo is updated."
+    )
+    raise RuntimeError(err_msg) from last_exc
 
 
 # ==============================================================================
@@ -2290,8 +2376,7 @@ class EYDHMAutomationEngine:
                         options.add_argument(proxy_to_use["chrome_arg"])
 
                     print_log_line("BROWSER", f"Launching isolated Chromium instance (Mode: {self.mode.upper()})...", "ACTION")
-                    service = Service(chromedriver_bin) if chromedriver_bin else Service()
-                    driver = await asyncio.to_thread(webdriver.Chrome, service=service, options=options)
+                    driver = await asyncio.to_thread(create_resilient_driver, options, headless)
                     driver.set_page_load_timeout(35)
 
                     try:
@@ -4260,8 +4345,7 @@ class FacebookRecoveryEngine:
                     options.add_argument(proxy_to_use["chrome_arg"])
                     write_runtime_log("PROXY", "LAUNCH", f"Launched browser with proxy: {proxy_to_use.get('raw')}")
 
-                service = Service(chromedriver_bin) if chromedriver_bin else Service()
-                driver = await asyncio.to_thread(webdriver.Chrome, service=service, options=options)
+                driver = await asyncio.to_thread(create_resilient_driver, options, headless)
                 driver.set_page_load_timeout(35)
 
                 try:
