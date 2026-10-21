@@ -7,3 +7,6 @@ faker>=24.0.0
 Pillow>=10.0.0
 phonenumbers>=8.13.0
 pytesseract>=0.3.10
+fake-useragent>=1.4.0
+cryptography>=42.0.0
+colorama>=0.4.6

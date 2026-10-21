@@ -99,7 +99,15 @@ ENDPOINT_PROFILES = {
 # ==============================================================================
 
 def ensure_dependencies():
-    """Verify runtime dependencies and install if missing across Termux, Debian, Ubuntu, Arch, and Fedora."""
+    """Verify runtime dependencies and install if missing via doctor module or embedded fallback."""
+    try:
+        from doctor import run_doctor
+        # Run auto-healing doctor silently for regular runs (prints only if missing packages need repair)
+        run_doctor(auto_repair=True, quiet=True)
+        return
+    except Exception:
+        pass
+
     packages = {
         "requests": "requests",
         "faker": "faker",
@@ -109,7 +117,9 @@ def ensure_dependencies():
         "aiohttp": "aiohttp",
         "PIL": "Pillow",
         "pytesseract": "pytesseract",
-        "phonenumbers": "phonenumbers"
+        "phonenumbers": "phonenumbers",
+        "fake_useragent": "fake-useragent",
+        "cryptography": "cryptography"
     }
     missing = []
     for mod, pkg in packages.items():
@@ -120,11 +130,17 @@ def ensure_dependencies():
 
     if missing:
         print(f"{AMBER}[*] Resolving runtime dependencies: {', '.join(missing)}{C_RESET}")
+        pip_args = [sys.executable, "-m", "pip", "install"]
+        if sys.version_info >= (3, 11):
+            pip_args.append("--break-system-packages")
         for pkg in missing:
             try:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", pkg], stdout=subprocess.DEVNULL)
+                subprocess.check_call(pip_args + [pkg], stdout=subprocess.DEVNULL)
             except Exception:
-                pass
+                try:
+                    subprocess.check_call([sys.executable, "-m", "pip", "install", pkg], stdout=subprocess.DEVNULL)
+                except Exception:
+                    pass
 
     # System binaries: tesseract and chromium
     if not shutil.which("tesseract"):
