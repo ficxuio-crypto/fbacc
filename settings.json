@@ -1,0 +1,17 @@
+{
+  "default_password": "ronin@21",
+  "default_mode": "instant",
+  "default_endpoint": "limited",
+  "kyc_image_url": "https://i.ibb.co.com/jkJ9cNZf/IMG-8bdbd8b0.jpg",
+  "proxy": null,
+  "proxy_pool": [],
+  "proxy_routing": {
+    "opt5": "before_otp_random",
+    "opt6": "disabled",
+    "opt7": "disabled",
+    "opt1": "disabled",
+    "opt3": "disabled"
+  },
+  "delay": 1.0,
+  "email_provider": "tempmail_lol"
+}

@@ -1,0 +1,32 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Output and credential logs (Private credentials & session cookies)
+phone_accounts.txt
+accounts_log.txt
+runtime_debug.log
+successful_recovery.txt
+reco_sms.txt
+invalid_otp_accounts.txt
+invalid_reset_accounts.txt
+live_checked_accounts.txt
+test_accounts_output.txt
+test_live_checked.txt
+prof_out.txt
+test_acc.txt
+
+# Screenshots and captured debug states
+*.png
+debug_states/
+sanitized_selfie.jpg
+
+# Temporary directories, profiles & virtual environments
+.env
+venv/
+.venv/
+env/
+eydhm_profile_*
+eydhm_reco_*
+.pytest_cache/
