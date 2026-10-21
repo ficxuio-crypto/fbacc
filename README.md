@@ -9,12 +9,12 @@ Enterprise-grade asynchronous DOM automation engine for Facebook account provisi
 Run this single command on **Termux (Android)**, **Linux**, or **macOS** to auto-detect your OS, install system dependencies (Chromium, Python, Tesseract), install Python libraries, and create a global `fbacc` shortcut:
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/theblackkinggamer/fbacc/main/install.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/ficxuio-crypto/fbacc/main/install.sh)
 ```
 
 ### Windows (PowerShell)
 ```powershell
-irm https://raw.githubusercontent.com/theblackkinggamer/fbacc/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/ficxuio-crypto/fbacc/main/install.ps1 | iex
 ```
 
 ---
@@ -23,7 +23,7 @@ irm https://raw.githubusercontent.com/theblackkinggamer/fbacc/main/install.ps1 |
 
 ```bash
 # 1. Clone repository
-git clone https://github.com/theblackkinggamer/fbacc.git
+git clone https://github.com/ficxuio-crypto/fbacc.git
 cd fbacc
 
 # 2. Run automated installer

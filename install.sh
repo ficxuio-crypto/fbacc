@@ -20,7 +20,7 @@ C_YELLOW='\033[38;5;226m'
 C_RED='\033[38;5;196m'
 C_GRAY='\033[38;5;244m'
 
-REPO_DEFAULT_URL="https://github.com/theblackkinggamer/fbacc.git"
+REPO_DEFAULT_URL="https://github.com/ficxuio-crypto/fbacc.git"
 INSTALL_DIR="${HOME}/fbacc"
 
 echo -e "\n${C_GREEN}${C_BOLD}"
