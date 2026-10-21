@@ -25,6 +25,8 @@ C_WHITE='\033[38;5;255m'
 C_EMERALD='\033[38;5;49m'
 
 REPO_DEFAULT_URL="https://github.com/ficxuio-crypto/fbacc.git"
+REPO_ARCHIVE_URL="https://github.com/ficxuio-crypto/fbacc/archive/refs/heads/main.tar.gz"
+REPO_RAW_URL="https://raw.githubusercontent.com/ficxuio-crypto/fbacc/main"
 INSTALL_DIR="${HOME}/fbacc"
 
 clear 2>/dev/null || true
@@ -66,33 +68,40 @@ echo -e "   ${C_GRAY}├──${C_RESET} Platform:      ${C_BOLD}${C_WHITE}${OS_
 echo -e "   ${C_GRAY}└──${C_RESET} Architecture:  ${C_BOLD}${C_WHITE}${ARCH}${C_RESET}\n"
 
 # ------------------------------------------------------------------------------
-# STEP 2: System Package Manager & Core Dependency Resolution
+# STEP 2: Native Package Management & Critical Bootstrap
 # ------------------------------------------------------------------------------
-echo -e "   ${C_BOLD}${C_CYAN}[2/5] Checking and Installing Native System Dependencies...${C_RESET}"
+echo -e "   ${C_BOLD}${C_CYAN}[2/5] Bootstrapping Native System Tools (Python, Git, Curl, Tar)...${C_RESET}"
 
 case "$OS_TYPE" in
     termux)
-        MISSING_PKGS=""
-        for p in python git curl wget binutils; do
-            if ! command -v "$p" >/dev/null 2>&1; then MISSING_PKGS="$MISSING_PKGS $p"; fi
+        # Phase 2A: Guarantee Core Base Packages from main repo (cannot fail on missing tur/x11)
+        MISSING_CORE=""
+        for p in python git curl wget tar binutils; do
+            if ! command -v "$p" >/dev/null 2>&1; then MISSING_CORE="$MISSING_CORE $p"; fi
         done
-        if ! command -v tesseract >/dev/null 2>&1; then MISSING_PKGS="$MISSING_PKGS tesseract"; fi
-        if ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/null 2>&1 && [ ! -f "/data/data/com.termux/files/usr/bin/chromium-browser" ]; then
-            MISSING_PKGS="$MISSING_PKGS tur-repo x11-repo chromium"
+
+        if [ -n "$MISSING_CORE" ]; then
+            echo -e "   ${C_GRAY}├──${C_RESET} Installing core Termux packages:${C_YELLOW}${MISSING_CORE}${C_RESET}..."
+            pkg install -y $MISSING_CORE 2>/dev/null || apt-get install -y $MISSING_CORE 2>/dev/null || true
+        else
+            echo -e "   ${C_GREEN}   ✔ Termux core tools (python, git, curl, tar) verified.${C_RESET}"
         fi
 
-        if [ -n "$MISSING_PKGS" ]; then
-            echo -e "   ${C_GRAY}├──${C_RESET} Installing missing Termux packages:${C_YELLOW}${MISSING_PKGS}${C_RESET}..."
-            pkg install -y $MISSING_PKGS >/dev/null 2>&1 || true
-        else
-            echo -e "   ${C_GREEN}   ✔ All Termux core system binaries are already present.${C_RESET}"
+        # Phase 2B: Auxiliary Repositories & Packages (tesseract, chromium)
+        if ! command -v tesseract >/dev/null 2>&1 || (! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/null 2>&1 && [ ! -f "/data/data/com.termux/files/usr/bin/chromium-browser" ]); then
+            echo -e "   ${C_GRAY}├──${C_RESET} Setting up extended Termux repositories (tur-repo, x11-repo)..."
+            pkg install -y tur-repo x11-repo >/dev/null 2>&1 || true
+            pkg install -y tesseract chromium >/dev/null 2>&1 || true
         fi
         echo ""
         ;;
 
     debian)
+        SUDO=""
+        if command -v sudo >/dev/null 2>&1 && [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; fi
+
         MISSING_PKGS=""
-        for p in python3 git curl wget; do
+        for p in python3 git curl wget tar; do
             if ! command -v "$p" >/dev/null 2>&1; then MISSING_PKGS="$MISSING_PKGS $p"; fi
         done
         if ! command -v pip3 >/dev/null 2>&1; then MISSING_PKGS="$MISSING_PKGS python3-pip python3-venv"; fi
@@ -102,20 +111,21 @@ case "$OS_TYPE" in
         fi
 
         if [ -n "$MISSING_PKGS" ]; then
-            SUDO=""
-            if command -v sudo >/dev/null 2>&1 && [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; fi
             echo -e "   ${C_GRAY}├──${C_RESET} Installing missing Debian/Ubuntu packages:${C_YELLOW}${MISSING_PKGS}${C_RESET}..."
             $SUDO apt update -y >/dev/null 2>&1 || true
-            $SUDO apt install -y $MISSING_PKGS >/dev/null 2>&1 || true
+            $SUDO apt install -y $MISSING_PKGS 2>/dev/null || true
         else
-            echo -e "   ${C_GREEN}   ✔ All Debian/Ubuntu system binaries are already present.${C_RESET}"
+            echo -e "   ${C_GREEN}   ✔ Debian/Ubuntu system packages verified.${C_RESET}"
         fi
         echo ""
         ;;
 
     arch)
+        SUDO=""
+        if command -v sudo >/dev/null 2>&1 && [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; fi
+
         MISSING_PKGS=""
-        for p in python git curl wget; do
+        for p in python git curl wget tar; do
             if ! command -v "$p" >/dev/null 2>&1; then MISSING_PKGS="$MISSING_PKGS $p"; fi
         done
         if ! command -v pip >/dev/null 2>&1; then MISSING_PKGS="$MISSING_PKGS python-pip"; fi
@@ -125,33 +135,33 @@ case "$OS_TYPE" in
         fi
 
         if [ -n "$MISSING_PKGS" ]; then
-            SUDO=""
-            if command -v sudo >/dev/null 2>&1 && [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; fi
             echo -e "   ${C_GRAY}├──${C_RESET} Installing missing Arch packages:${C_YELLOW}${MISSING_PKGS}${C_RESET}..."
-            $SUDO pacman -Sy --noconfirm $MISSING_PKGS >/dev/null 2>&1 || true
+            $SUDO pacman -Sy --noconfirm $MISSING_PKGS 2>/dev/null || true
         else
-            echo -e "   ${C_GREEN}   ✔ All Arch Linux system binaries are already present.${C_RESET}"
+            echo -e "   ${C_GREEN}   ✔ Arch Linux system packages verified.${C_RESET}"
         fi
         echo ""
         ;;
 
     fedora)
+        SUDO=""
+        if command -v sudo >/dev/null 2>&1 && [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; fi
+
         MISSING_PKGS=""
-        for p in python3 git curl wget; do
+        for p in python3 git curl wget tar; do
             if ! command -v "$p" >/dev/null 2>&1; then MISSING_PKGS="$MISSING_PKGS $p"; fi
         done
         if ! command -v pip3 >/dev/null 2>&1; then MISSING_PKGS="$MISSING_PKGS python3-pip"; fi
         if ! command -v tesseract >/dev/null 2>&1; then MISSING_PKGS="$MISSING_PKGS tesseract"; fi
         if ! command -v chromium >/dev/null 2>&1 && ! command -v google-chrome >/dev/null 2>&1; then
-            MISSING_PKGS="$MISSING_PKGS chromium xorg-x11-server-Xvfb"; fi
+            MISSING_PKGS="$MISSING_PKGS chromium xorg-x11-server-Xvfb"
+        fi
 
         if [ -n "$MISSING_PKGS" ]; then
-            SUDO=""
-            if command -v sudo >/dev/null 2>&1 && [ "$(id -u)" -ne 0 ]; then SUDO="sudo"; fi
             echo -e "   ${C_GRAY}├──${C_RESET} Installing missing Fedora packages:${C_YELLOW}${MISSING_PKGS}${C_RESET}..."
-            $SUDO dnf install -y $MISSING_PKGS >/dev/null 2>&1 || true
+            $SUDO dnf install -y $MISSING_PKGS 2>/dev/null || true
         else
-            echo -e "   ${C_GREEN}   ✔ All Fedora system binaries are already present.${C_RESET}"
+            echo -e "   ${C_GREEN}   ✔ Fedora system packages verified.${C_RESET}"
         fi
         echo ""
         ;;
@@ -159,17 +169,17 @@ case "$OS_TYPE" in
     macos)
         if ! command -v brew >/dev/null 2>&1; then
             echo -e "   ${C_YELLOW}   [!] Homebrew not detected. Installing Homebrew...${C_RESET}"
-            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
         fi
         MISSING_PKGS=""
-        for p in python git curl tesseract; do
+        for p in python git curl tar tesseract; do
             if ! command -v "$p" >/dev/null 2>&1; then MISSING_PKGS="$MISSING_PKGS $p"; fi
         done
         if [ -n "$MISSING_PKGS" ]; then
             echo -e "   ${C_GRAY}├──${C_RESET} Installing missing Homebrew packages:${C_YELLOW}${MISSING_PKGS}${C_RESET}..."
             brew install $MISSING_PKGS || true
         else
-            echo -e "   ${C_GREEN}   ✔ All macOS system packages are already present.${C_RESET}"
+            echo -e "   ${C_GREEN}   ✔ macOS system packages verified.${C_RESET}"
         fi
         echo ""
         ;;
@@ -180,9 +190,9 @@ case "$OS_TYPE" in
 esac
 
 # ------------------------------------------------------------------------------
-# STEP 3: Source Repository Synchronization
+# STEP 3: Source Repository Synchronization (3-Tier Redundant Retrieval)
 # ------------------------------------------------------------------------------
-echo -e "   ${C_BOLD}${C_CYAN}[3/5] Resolving Engine Workspace & Repository...${C_RESET}"
+echo -e "   ${C_BOLD}${C_CYAN}[3/5] Resolving Engine Workspace & Codebase...${C_RESET}"
 
 CURRENT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 
@@ -191,18 +201,49 @@ if [ -f "${CURRENT_SCRIPT_DIR}/fbacc.py" ] && [ -f "${CURRENT_SCRIPT_DIR}/doctor
     echo -e "   ${C_GRAY}└──${C_RESET} Executing inside existing repository: ${C_BOLD}${C_WHITE}${TARGET_DIR}${C_RESET}\n"
 else
     TARGET_DIR="${INSTALL_DIR}"
-    if [ ! -d "${TARGET_DIR}/.git" ]; then
-        echo -e "   ${C_GRAY}├──${C_RESET} Cloning repository to: ${C_BOLD}${C_WHITE}${TARGET_DIR}${C_RESET}"
-        REPO_URL="${FBACC_REPO_URL:-$REPO_DEFAULT_URL}"
-        git clone "$REPO_URL" "$TARGET_DIR" 2>/dev/null || {
-            echo -e "   ${C_YELLOW}   [!] Git clone encountered an issue. Initializing directory...${C_RESET}"
-            mkdir -p "$TARGET_DIR"
-        }
-    else
-        echo -e "   ${C_GRAY}├──${C_RESET} Updating local repository at: ${C_BOLD}${C_WHITE}${TARGET_DIR}${C_RESET}"
-        (cd "$TARGET_DIR" && git pull --quiet origin main 2>/dev/null || true)
+    REPO_URL="${FBACC_REPO_URL:-$REPO_DEFAULT_URL}"
+
+    # Method 1: Git Clone or Git Pull
+    CLONED=false
+    if [ -d "${TARGET_DIR}/.git" ]; then
+        echo -e "   ${C_GRAY}├──${C_RESET} Updating existing repository at: ${C_BOLD}${C_WHITE}${TARGET_DIR}${C_RESET}"
+        (cd "$TARGET_DIR" && git pull origin main >/dev/null 2>&1 || true)
+        if [ -f "${TARGET_DIR}/fbacc.py" ]; then CLONED=true; fi
+    elif command -v git >/dev/null 2>&1; then
+        echo -e "   ${C_GRAY}├──${C_RESET} Cloning repository via Git to: ${C_BOLD}${C_WHITE}${TARGET_DIR}${C_RESET}"
+        rm -rf "$TARGET_DIR" 2>/dev/null || true
+        if git clone --depth 1 "$REPO_URL" "$TARGET_DIR" >/dev/null 2>&1; then
+            if [ -f "${TARGET_DIR}/fbacc.py" ]; then CLONED=true; fi
+        fi
     fi
-    echo -e "   ${C_GRAY}└──${C_RESET} Workspace ready.\n"
+
+    # Method 2: Direct HTTP Tarball Extraction (Fallback if git failed or is absent)
+    if [ "$CLONED" != "true" ] || [ ! -f "${TARGET_DIR}/fbacc.py" ]; then
+        echo -e "   ${C_GRAY}├──${C_RESET} ${C_YELLOW}Git clone unavailable. Downloading release archive via HTTP...${C_RESET}"
+        mkdir -p "$TARGET_DIR"
+        (curl -fsSL "$REPO_ARCHIVE_URL" 2>/dev/null | tar -xz --strip-components=1 -C "$TARGET_DIR" 2>/dev/null) || \
+        (wget -qO- "$REPO_ARCHIVE_URL" 2>/dev/null | tar -xz --strip-components=1 -C "$TARGET_DIR" 2>/dev/null) || true
+        if [ -f "${TARGET_DIR}/fbacc.py" ]; then CLONED=true; fi
+    fi
+
+    # Method 3: Direct Raw CDN File-by-File Fetch (Ultimate Fallback)
+    if [ "$CLONED" != "true" ] || [ ! -f "${TARGET_DIR}/fbacc.py" ]; then
+        echo -e "   ${C_GRAY}├──${C_RESET} ${C_YELLOW}Fetching core files individually via raw CDN...${C_RESET}"
+        mkdir -p "$TARGET_DIR"
+        for fname in fbacc.py fbacc_pro.py doctor.py requirements.txt settings.json install.sh; do
+            curl -fsSL "${REPO_RAW_URL}/${fname}" -o "${TARGET_DIR}/${fname}" 2>/dev/null || \
+            wget -q "${REPO_RAW_URL}/${fname}" -O "${TARGET_DIR}/${fname}" 2>/dev/null || true
+        done
+    fi
+
+    # Strict Verification Gate: Ensure code is present before continuing!
+    if [ ! -f "${TARGET_DIR}/fbacc.py" ] || [ ! -s "${TARGET_DIR}/fbacc.py" ]; then
+        echo -e "\n   ${C_RED}${C_BOLD}[X] FATAL: Could not retrieve engine files into ${TARGET_DIR}.${C_RESET}"
+        echo -e "   ${C_YELLOW}Please check your network connection or clone manually:${C_RESET}"
+        echo -e "      git clone https://github.com/ficxuio-crypto/fbacc.git ~/fbacc\n"
+        exit 1
+    fi
+    echo -e "   ${C_GREEN}   ✔ Codebase verified at: ${C_BOLD}${TARGET_DIR}${C_RESET}\n"
 fi
 
 cd "$TARGET_DIR"
@@ -212,17 +253,28 @@ cd "$TARGET_DIR"
 # ------------------------------------------------------------------------------
 echo -e "   ${C_BOLD}${C_CYAN}[4/5] Executing Smart Doctor Diagnostic & Dependency Healer...${C_RESET}"
 
-PYTHON_BIN="python3"
-if ! command -v python3 >/dev/null 2>&1; then
-    if command -v python >/dev/null 2>&1; then
-        PYTHON_BIN="python"
-    else
-        echo -e "   ${C_RED}[!] Python not found! Please install Python 3.8+${C_RESET}"
-        exit 1
+PYTHON_BIN=""
+for py in python3 python; do
+    if command -v "$py" >/dev/null 2>&1; then
+        if "$py" -c "import sys; exit(0 if sys.version_info.major == 3 else 1)" >/dev/null 2>&1; then
+            PYTHON_BIN="$py"
+            break
+        fi
     fi
+done
+
+if [ -z "$PYTHON_BIN" ]; then
+    echo -e "   ${C_RED}[!] Python 3 not detected. Attempting emergency bootstrap...${C_RESET}"
+    if [ "$OS_TYPE" = "termux" ]; then
+        pkg install -y python 2>/dev/null || apt-get install -y python 2>/dev/null || true
+    elif [ "$OS_TYPE" = "debian" ]; then
+        $SUDO apt update -y >/dev/null 2>&1 || true
+        $SUDO apt install -y python3 python3-pip 2>/dev/null || true
+    fi
+    PYTHON_BIN="python3"
 fi
 
-# Ensure pip is functional
+# Ensure pip is present
 $PYTHON_BIN -m pip --version >/dev/null 2>&1 || {
     echo -e "   ${C_YELLOW}   [!] Bootstrapping pip...${C_RESET}"
     $PYTHON_BIN -m ensurepip --default-pip >/dev/null 2>&1 || true
@@ -232,9 +284,9 @@ $PYTHON_BIN -m pip --version >/dev/null 2>&1 || {
 if [ -f "doctor.py" ]; then
     $PYTHON_BIN doctor.py
 else
-    echo -e "   ${C_YELLOW}   [!] doctor.py not found in directory. Falling back to requirements.txt...${C_RESET}"
+    echo -e "   ${C_YELLOW}   [!] doctor.py not found in directory. Falling back to pip...${C_RESET}"
     $PYTHON_BIN -m pip install -r requirements.txt --break-system-packages --quiet 2>/dev/null || \
-    $PYTHON_BIN -m pip install -r requirements.txt --quiet || true
+    $PYTHON_BIN -m pip install -r requirements.txt --quiet 2>/dev/null || true
 fi
 
 # ------------------------------------------------------------------------------
@@ -247,21 +299,40 @@ chmod +x fbacc.py fbacc_pro.py doctor.py install.sh 2>/dev/null || true
 BIN_DIR=""
 if [ "$OS_TYPE" = "termux" ]; then
     BIN_DIR="/data/data/com.termux/files/usr/bin"
+elif [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
+    BIN_DIR="/usr/local/bin"
 elif [ -d "${HOME}/.local/bin" ]; then
     BIN_DIR="${HOME}/.local/bin"
     mkdir -p "$BIN_DIR"
-elif [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
-    BIN_DIR="/usr/local/bin"
+else
+    mkdir -p "${HOME}/.local/bin"
+    BIN_DIR="${HOME}/.local/bin"
 fi
 
 if [ -n "$BIN_DIR" ] && [ -d "$BIN_DIR" ]; then
     LAUNCHER="${BIN_DIR}/fbacc"
     cat <<EOF > "$LAUNCHER"
 #!/bin/sh
+if [ ! -f "${TARGET_DIR}/fbacc.py" ]; then
+    echo "Error: fbacc engine files not found in ${TARGET_DIR}" >&2
+    exit 1
+fi
 cd "${TARGET_DIR}" && exec "${PYTHON_BIN}" fbacc.py "\$@"
 EOF
     chmod +x "$LAUNCHER"
     echo -e "   ${C_GRAY}└──${C_RESET} Global command registered: ${C_BOLD}${C_GREEN}${LAUNCHER}${C_RESET}\n"
+
+    # Ensure ~/.local/bin is in PATH if used
+    if [ "$BIN_DIR" = "${HOME}/.local/bin" ]; then
+        case ":$PATH:" in
+            *":${HOME}/.local/bin:"*) ;;
+            *)
+                echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "${HOME}/.bashrc" 2>/dev/null || true
+                echo "export PATH=\"\$HOME/.local/bin:\$PATH\"" >> "${HOME}/.zshrc" 2>/dev/null || true
+                export PATH="${HOME}/.local/bin:$PATH"
+                ;;
+        esac
+    fi
 else
     echo -e "   ${C_GRAY}└──${C_RESET} Local execution ready in ${TARGET_DIR}\n"
 fi
