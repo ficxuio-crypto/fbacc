@@ -394,6 +394,17 @@ run_step_with_spinner "$DOCTOR_CMD" \
 # ------------------------------------------------------------------------------
 # STEP 5: Binary Symlink & Global CLI Command Integration
 # ------------------------------------------------------------------------------
+if [ "$OS_TYPE" = "termux" ]; then
+    mkdir -p "/data/data/com.termux/files/usr/tmp"
+    chmod 700 "/data/data/com.termux/files/usr/tmp" 2>/dev/null || true
+    if [ -f "/data/data/com.termux/files/usr/lib/chromium/chromedriver" ] && [ ! -e "/data/data/com.termux/files/usr/bin/chromedriver" ]; then
+        ln -sf ../lib/chromium/chromedriver /data/data/com.termux/files/usr/bin/chromedriver 2>/dev/null || true
+    fi
+    if [ -f "/data/data/com.termux/files/usr/lib/chromium/chrome" ] && [ ! -e "/data/data/com.termux/files/usr/bin/chromium" ]; then
+        ln -sf ../lib/chromium/chromium-launcher.sh /data/data/com.termux/files/usr/bin/chromium 2>/dev/null || true
+    fi
+fi
+
 chmod +x fbacc.py fbacc_pro.py doctor.py install.sh 2>/dev/null || true
 
 BIN_DIR=""

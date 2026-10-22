@@ -325,6 +325,7 @@ def smart_update_reco_sms(phone: str, status: str = "RECO SMS SENT ✅") -> int:
 
 def get_chromium_binary() -> Optional[str]:
     candidates = [
+        "/data/data/com.termux/files/usr/lib/chromium/chrome",
         "/data/data/com.termux/files/usr/bin/chromium-browser",
         "/data/data/com.termux/files/usr/bin/chromium",
         "chromium-browser",
@@ -345,6 +346,7 @@ def get_chromium_binary() -> Optional[str]:
 
 def get_chromedriver_binary() -> Optional[str]:
     candidates = [
+        "/data/data/com.termux/files/usr/lib/chromium/chromedriver",
         "/data/data/com.termux/files/usr/bin/chromedriver",
         "chromedriver",
         "/usr/bin/chromedriver",
@@ -358,12 +360,12 @@ def get_chromedriver_binary() -> Optional[str]:
 
 
 def kill_zombie_browsers():
-    """Clean up orphaned chromium and chromedriver processes to prevent memory leaks and port collisions."""
+    """Clean up orphaned chromium and chromedriver processes safely to prevent port collisions."""
     try:
         if IS_ANDROID or sys.platform.startswith("linux"):
-            for proc_name in ("chromedriver", "chromium-browser", "chromium", "chrome"):
+            for proc_name in ("chromedriver", "chrome", "chromium-browser"):
                 try:
-                    subprocess.run(["pkill", "-9", "-f", proc_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    subprocess.run(["pkill", "-9", "-x", proc_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 except Exception:
                     pass
     except Exception:
@@ -377,78 +379,131 @@ def create_resilient_driver(options: Any, headless: bool = True) -> Any:
     """
     from selenium import webdriver
     from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.chrome.options import Options
 
-    # Termux Android TMPDIR safety
+    # Termux Android TMPDIR & XDG safety
     if IS_ANDROID or os.path.exists("/data/data/com.termux"):
         termux_tmp = "/data/data/com.termux/files/usr/tmp"
         os.environ["TMPDIR"] = termux_tmp
         try:
             os.makedirs(termux_tmp, exist_ok=True)
+            os.chmod(termux_tmp, 0o700)
         except Exception:
             pass
 
     chrome_bin = get_chromium_binary()
     chromedriver_bin = get_chromedriver_binary()
 
-    if chrome_bin and (not hasattr(options, "binary_location") or not options.binary_location):
-        options.binary_location = chrome_bin
+    log_path = os.path.expanduser("~/.chromedriver.log")
 
-    # Ensure baseline sandbox/shm/port flags
-    baseline_args = [
+    # Baseline arguments essential for Linux / Android headless
+    base_args = [
         "--no-sandbox",
         "--disable-dev-shm-usage",
         "--disable-gpu",
-        "--remote-debugging-port=0"
+        "--disable-software-rasterizer",
+        "--ozone-platform=headless",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-features=IsolateOrigins,site-per-process,AudioServiceOutOfProcess"
     ]
-    for arg in baseline_args:
+    for arg in base_args:
         if arg not in options.arguments:
             options.add_argument(arg)
 
+    if "--remote-debugging-port=0" in options.arguments:
+        options.arguments.remove("--remote-debugging-port=0")
+
     last_exc = None
 
-    # Tier 1: Launch with dynamic port (port=0) and silenced log output
+    # TIER 1: Standard Modern Headless with detected direct binary
     try:
-        service = Service(executable_path=chromedriver_bin, port=0, log_output=subprocess.DEVNULL) if chromedriver_bin else Service(port=0, log_output=subprocess.DEVNULL)
-        driver = webdriver.Chrome(service=service, options=options)
+        opt_t1 = Options()
+        for a in options.arguments: opt_t1.add_argument(a)
+        if chrome_bin: opt_t1.binary_location = chrome_bin
+        if hasattr(options, "page_load_strategy"): opt_t1.page_load_strategy = options.page_load_strategy
+
+        service = Service(executable_path=chromedriver_bin, port=0, log_output=log_path) if chromedriver_bin else Service(port=0, log_output=log_path)
+        driver = webdriver.Chrome(service=service, options=opt_t1)
         return driver
     except Exception as e:
         last_exc = e
-        write_runtime_log("DRIVER", "RETRY", f"Tier 1 ChromeDriver launch failed: {e}. Executing zombie cleanup and fallback tier...")
+        write_runtime_log("DRIVER", "RETRY", f"Tier 1 ChromeDriver launch failed: {e}. Executing zombie cleanup and fallback tier 2...")
 
-    # Tier 2: Kill zombies, switch headless mode, and retry
+    # TIER 2: Kill zombies, switch to classic headless mode, add crash prevention
     kill_zombie_browsers()
-    time.sleep(0.5)
+    time.sleep(0.4)
 
     try:
-        # If --headless=new failed on older kernel or specialized driver, fallback to classic --headless or adjust flags
-        opts_t2 = options
-        if "--headless=new" in opts_t2.arguments:
-            opts_t2.arguments.remove("--headless=new")
-            opts_t2.add_argument("--headless")
-        if "--single-process" not in opts_t2.arguments and (IS_ANDROID or os.path.exists("/data/data/com.termux")):
-            opts_t2.add_argument("--single-process")
-        if "--disable-setuid-sandbox" not in opts_t2.arguments:
-            opts_t2.add_argument("--disable-setuid-sandbox")
+        opt_t2 = Options()
+        for a in options.arguments:
+            if a != "--headless=new": opt_t2.add_argument(a)
+        opt_t2.add_argument("--headless")
+        opt_t2.add_argument("--disable-crash-reporter")
+        opt_t2.add_argument("--disable-breakpad")
+        opt_t2.add_argument("--disable-logging")
+        if chrome_bin: opt_t2.binary_location = chrome_bin
+        if hasattr(options, "page_load_strategy"): opt_t2.page_load_strategy = options.page_load_strategy
 
-        service = Service(executable_path=chromedriver_bin, port=0, log_output=subprocess.DEVNULL) if chromedriver_bin else Service(port=0, log_output=subprocess.DEVNULL)
-        driver = webdriver.Chrome(service=service, options=opts_t2)
+        service = Service(executable_path=chromedriver_bin, port=0, log_output=log_path) if chromedriver_bin else Service(port=0, log_output=log_path)
+        driver = webdriver.Chrome(service=service, options=opt_t2)
         return driver
     except Exception as e:
         last_exc = e
-        write_runtime_log("DRIVER", "RETRY", f"Tier 2 ChromeDriver launch failed: {e}. Trying system PATH fallback...")
+        write_runtime_log("DRIVER", "RETRY", f"Tier 2 ChromeDriver launch failed: {e}. Trying launcher wrapper script fallback tier 3...")
 
-    # Tier 3: Launch without explicit chromedriver_bin path (let Selenium / Selenium Manager resolve)
+    # TIER 3: Wrapper script fallback (/usr/bin/chromium-browser or system PATH)
+    kill_zombie_browsers()
+    time.sleep(0.4)
+
     try:
-        service = Service(port=0, log_output=subprocess.DEVNULL)
-        driver = webdriver.Chrome(service=service, options=options)
+        wrapper_bin = "/data/data/com.termux/files/usr/bin/chromium-browser" if os.path.isfile("/data/data/com.termux/files/usr/bin/chromium-browser") else shutil.which("chromium-browser") or shutil.which("chromium")
+        opt_t3 = Options()
+        for a in options.arguments:
+            if a != "--headless=new": opt_t3.add_argument(a)
+        opt_t3.add_argument("--headless")
+        if wrapper_bin: opt_t3.binary_location = wrapper_bin
+        if hasattr(options, "page_load_strategy"): opt_t3.page_load_strategy = options.page_load_strategy
+
+        service_bin = "/data/data/com.termux/files/usr/bin/chromedriver" if os.path.isfile("/data/data/com.termux/files/usr/bin/chromedriver") else chromedriver_bin
+        service = Service(executable_path=service_bin, port=0, log_output=log_path) if service_bin else Service(port=0, log_output=log_path)
+        driver = webdriver.Chrome(service=service, options=opt_t3)
+        return driver
+    except Exception as e:
+        last_exc = e
+        write_runtime_log("DRIVER", "RETRY", f"Tier 3 ChromeDriver launch failed: {e}. Trying minimal barebones tier 4...")
+
+    # TIER 4: Minimal barebones launch (isolated fresh profile, zero extensions)
+    kill_zombie_browsers()
+    time.sleep(0.4)
+
+    try:
+        opt_t4 = Options()
+        opt_t4.add_argument("--headless")
+        opt_t4.add_argument("--no-sandbox")
+        opt_t4.add_argument("--disable-dev-shm-usage")
+        opt_t4.add_argument("--disable-gpu")
+        opt_t4.add_argument("--ozone-platform=headless")
+        if chrome_bin: opt_t4.binary_location = chrome_bin
+        service = Service(executable_path=chromedriver_bin, port=0, log_output=log_path) if chromedriver_bin else Service(port=0, log_output=log_path)
+        driver = webdriver.Chrome(service=service, options=opt_t4)
         return driver
     except Exception as e:
         last_exc = e
 
+    # Extract log tail from ~/.chromedriver.log for diagnostics
+    tail_log = ""
+    try:
+        if os.path.exists(log_path):
+            with open(log_path, "r", encoding="utf-8", errors="ignore") as lf:
+                tail_log = "".join(lf.readlines()[-12:]).strip()
+    except Exception:
+        pass
+
+    log_detail = f"\nChromeDriver Log:\n{tail_log}" if tail_log else ""
     err_msg = (
-        f"Chromium/ChromeDriver failed to launch across all 3 resilience tiers.\n"
-        f"Details: {last_exc}\n"
-        f"Hint for Termux/Linux: Run 'fbacc doctor' to reinstall chromium or ensure x11/tur-repo is updated."
+        f"Chromium/ChromeDriver failed to launch across all 4 resilience tiers.\n"
+        f"Details: {last_exc}{log_detail}\n"
+        f"Hint for Termux: Run 'fbacc doctor' to auto-repair binary paths & permissions."
     )
     raise RuntimeError(err_msg) from last_exc
 
@@ -2345,7 +2400,7 @@ class EYDHMAutomationEngine:
                     options.add_argument("--no-first-run")
                     options.add_argument("--disable-features=OptimizationHints,Translate,Prewarm,PaintHolding")
                     options.add_argument(f"--user-data-dir={temp_dir}")
-                    options.add_argument(f"user-agent={random.choice(MOBILE_UA)}")
+                    options.add_argument(f"--user-agent={random.choice(MOBILE_UA)}")
                     options.add_argument("--window-size=412,915")  # Mobile Android Viewport
 
                     if self.mode in ("ultra", "instant"):
@@ -4320,7 +4375,7 @@ class FacebookRecoveryEngine:
                 options.add_argument("--disable-blink-features=AutomationControlled")
                 options.add_argument("--disable-extensions")
                 options.add_argument(f"--user-data-dir={temp_dir}")
-                options.add_argument(f"user-agent={random.choice(MOBILE_UA)}")
+                options.add_argument(f"--user-agent={random.choice(MOBILE_UA)}")
                 options.add_argument("--window-size=412,915")
                 options.page_load_strategy = "eager" if self.mode in ("ultra", "fast") else "none"
 
@@ -5032,8 +5087,13 @@ class FacebookRecoveryEngine:
 
         except Exception as e:
             record["status"] = "ERROR ⚠️"
-            record["diagnostics"] = str(e)[:80]
-            print_stage_log(total, index, f"Recovery exception: {record['diagnostics']}", emoji="❌")
+            first_line = str(e).split("\n")[0].strip()
+            record["diagnostics"] = first_line[:140]
+            print_stage_log(total, index, f"Recovery exception: {first_line[:140]}", emoji="❌")
+            if "\n" in str(e):
+                for sub_line in str(e).split("\n")[1:]:
+                    if sub_line.strip():
+                        print(f"      {GRAY}{sub_line.strip()[:120]}{C_RESET}")
             self._log_invalid_reset(record)
             if self.mode == "ultra" and self.persistent_driver:
                 try: self.persistent_driver.quit()
@@ -5445,12 +5505,29 @@ GRADIENT_COLS = [G0, G1, G2, G3, G4]
 
 
 def render_eydhm_banner(subtitle: str = "ENTERPRISE QA AUTOMATION & RESILIENCE ENGINE"):
+    cols = shutil.get_terminal_size((80, 24)).columns
     print("")
-    for col, line in zip(GRADIENT_COLS, EYDHM_ASCII):
-        print(f"{col}{line}{C_RESET}")
-    print(f"   {WHITE}{C_BOLD}{subtitle}{C_RESET}")
-    print(f"   {GRAY}Architecture: Async EventBus · High-Fidelity DOM Automation · Termux aarch64 Native{C_RESET}")
-    print(f"   {G4}─────────────────────────────────────────────────────────────────{C_RESET}\n")
+    if cols < 68:
+        compact_ascii = [
+            "  ███████  ██    ██  ██████   ██   ██  ███    ███",
+            "  ██        ██  ██   ██   ██  ██   ██  ████  ████",
+            "  █████      ████    ██   ██  ███████  ██ ████ ██",
+            "  ██          ██     ██   ██  ██   ██  ██  ██  ██",
+            "  ███████     ██     ██████   ██   ██  ██      ██"
+        ]
+        for col, line in zip(GRADIENT_COLS, compact_ascii):
+            print(f"{col}{line[:max(10, cols - 1)]}{C_RESET}")
+        print(f"  {WHITE}{C_BOLD}{subtitle[:max(10, cols - 2)]}{C_RESET}")
+        arch = "Async EventBus · High-Fidelity DOM · Termux Native"
+        print(f"  {GRAY}{arch[:max(10, cols - 2)]}{C_RESET}")
+        sep = "─" * min(cols - 2, 65)
+        print(f"  {G4}{sep}{C_RESET}\n")
+    else:
+        for col, line in zip(GRADIENT_COLS, EYDHM_ASCII):
+            print(f"{col}{line}{C_RESET}")
+        print(f"   {WHITE}{C_BOLD}{subtitle}{C_RESET}")
+        print(f"   {GRAY}Architecture: Async EventBus · High-Fidelity DOM Automation · Termux aarch64 Native{C_RESET}")
+        print(f"   {G4}─────────────────────────────────────────────────────────────────{C_RESET}\n")
 
 
 async def run_batch_pipeline_async(config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -5583,8 +5660,13 @@ async def run_batch_pipeline_async(config: Dict[str, Any]) -> Optional[Dict[str,
 # ==============================================================================
 
 def clear_screen():
-    sys.stdout.write(C_CLEAR)
-    sys.stdout.flush()
+    try:
+        # Clear visible screen, clear scrollback history buffer, move cursor to 1,1
+        sys.stdout.write("\033[2J\033[3J\033[H")
+        sys.stdout.flush()
+    except Exception:
+        sys.stdout.write(C_CLEAR)
+        sys.stdout.flush()
 
 
 def prompt_step_choice(step_title: str, options: List[str], default: int = 1) -> int:
@@ -6786,6 +6868,7 @@ def main():
 
             curr_config = config
             while curr_config is not None:
+                clear_screen()
                 render_eydhm_banner()
                 act = curr_config.get("action", "")
                 if act in ("reset_account", "reset_otp"):
@@ -6844,6 +6927,7 @@ def main():
             "output": args.output or "phone_accounts.txt",
             "dry_run": args.dry_run
         }
+        clear_screen()
         render_eydhm_banner()
         asyncio.run(run_hybrid_batch_pipeline_async(config))
         return
@@ -6891,6 +6975,7 @@ def main():
             "output": "successful_recovery.txt" if action == "reset_account" else "reco_sms.txt",
             "dry_run": args.dry_run
         }
+        clear_screen()
         render_eydhm_banner()
         asyncio.run(run_recovery_batch_pipeline_async(config))
         return
@@ -6920,6 +7005,7 @@ def main():
         "dry_run": args.dry_run
     }
 
+    clear_screen()
     render_eydhm_banner()
     asyncio.run(run_batch_pipeline_async(config))
 

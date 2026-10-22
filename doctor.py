@@ -156,7 +156,7 @@ SYSTEM_DEPENDENCIES = [
     },
     {
         "name": "Chromium Browser Engine",
-        "bins": ["chromium-browser", "chromium", "google-chrome-stable", "google-chrome", "chrome"],
+        "bins": ["/data/data/com.termux/files/usr/lib/chromium/chrome", "chromium-browser", "chromium", "google-chrome-stable", "google-chrome", "chrome"],
         "termux": "chromium",
         "apt": "chromium-browser",
         "pacman": "chromium",
@@ -164,6 +164,17 @@ SYSTEM_DEPENDENCIES = [
         "brew": "chromium",
         "critical": True,
         "desc": "Headless browser automation engine"
+    },
+    {
+        "name": "ChromeDriver WebDriver",
+        "bins": ["/data/data/com.termux/files/usr/lib/chromium/chromedriver", "/data/data/com.termux/files/usr/bin/chromedriver", "chromedriver"],
+        "termux": "chromium",
+        "apt": "chromium-chromedriver",
+        "pacman": "chromium",
+        "dnf": "chromedriver",
+        "brew": "chromedriver",
+        "critical": True,
+        "desc": "WebDriver binary service for browser control"
     },
     {
         "name": "Tesseract OCR Engine",
@@ -311,7 +322,7 @@ class SystemDoctor:
         ))
 
         # 1. Platform & Python Core Check
-        self.log(f" {Styler.BOLD}{Styler.CYAN}[1/3] Environment & Runtime Diagnostics{Styler.RESET}")
+        self.log(f" {Styler.BOLD}{Styler.CYAN}[1/4] Environment & Runtime Diagnostics{Styler.RESET}")
         
         py_major, py_minor = sys.version_info.major, sys.version_info.minor
         if py_major >= 3 and py_minor >= 8:
@@ -334,14 +345,14 @@ class SystemDoctor:
             self.all_healthy = False
 
         # 2. System Tools & Binaries
-        self.log(f"\n {Styler.BOLD}{Styler.CYAN}[2/3] System Tools & Binary Drivers{Styler.RESET}")
+        self.log(f"\n {Styler.BOLD}{Styler.CYAN}[2/4] System Tools & Binary Drivers{Styler.RESET}")
         for dep in SYSTEM_DEPENDENCIES:
             name = dep["name"]
             bins = dep["bins"]
             found_bin = None
             for b in bins:
-                p = shutil.which(b)
-                if p:
+                p = shutil.which(b) if not os.path.isabs(b) else b
+                if p and os.path.isfile(p) and os.access(p, os.X_OK):
                     found_bin = p
                     break
 
@@ -369,7 +380,7 @@ class SystemDoctor:
                         self.all_healthy = False
 
         # 3. Python Dependencies (Small to Big)
-        self.log(f"\n {Styler.BOLD}{Styler.CYAN}[3/3] Python Wheels & Libraries Check{Styler.RESET}")
+        self.log(f"\n {Styler.BOLD}{Styler.CYAN}[3/4] Python Wheels & Libraries Check{Styler.RESET}")
         for mod_name, pip_spec, min_ver, desc, is_critical in PYTHON_DEPENDENCIES:
             installed = False
             try:
@@ -406,6 +417,46 @@ class SystemDoctor:
                     self.print_item(mod_name, status, f"pip install {pip_spec}")
                     if is_critical:
                         self.all_healthy = False
+
+        # 4. End-to-End Headless Browser Diagnostics
+        self.log(f"\n {Styler.BOLD}{Styler.CYAN}[4/4] End-to-End Browser Automation Diagnostics{Styler.RESET}")
+        try:
+            from fbacc_pro import create_resilient_driver
+            from selenium.webdriver.chrome.options import Options
+
+            test_opts = Options()
+            test_opts.add_argument("--headless=new")
+            test_driver = create_resilient_driver(test_opts, headless=True)
+            test_driver.quit()
+            self.print_item("Headless WebDriver Lifecycle", Styler.badge("PASS", Styler.GREEN), "Zero-overhead launch verified")
+        except Exception as b_err:
+            if self.auto_repair:
+                self.print_item("Headless WebDriver Lifecycle", Styler.badge("REPAIRING", Styler.YELLOW), "Sanitizing environment & symlinks...")
+                # Auto-repair symlinks and permissions
+                if self.plat["is_termux"]:
+                    usr_tmp = "/data/data/com.termux/files/usr/tmp"
+                    os.makedirs(usr_tmp, exist_ok=True)
+                    os.chmod(usr_tmp, 0o700)
+                    cd_real = "/data/data/com.termux/files/usr/lib/chromium/chromedriver"
+                    cd_link = "/data/data/com.termux/files/usr/bin/chromedriver"
+                    if os.path.exists(cd_real) and not os.path.exists(cd_link):
+                        try: os.symlink(cd_real, cd_link)
+                        except Exception: pass
+                # Re-try
+                try:
+                    from fbacc_pro import create_resilient_driver
+                    from selenium.webdriver.chrome.options import Options
+                    test_opts = Options()
+                    test_opts.add_argument("--headless")
+                    re_driver = create_resilient_driver(test_opts, headless=True)
+                    re_driver.quit()
+                    self.print_item("Headless WebDriver Lifecycle", Styler.badge("REPAIRED", Styler.EMERALD), "Operational after auto-repair")
+                except Exception as re_err:
+                    self.print_item("Headless WebDriver Lifecycle", Styler.badge("FAIL", Styler.RED), str(re_err)[:50])
+                    self.all_healthy = False
+            else:
+                self.print_item("Headless WebDriver Lifecycle", Styler.badge("FAIL", Styler.RED), str(b_err)[:50])
+                self.all_healthy = False
 
         # Summary Banner
         self.log(f"\n{Styler.GRAY}─────────────────────────────────────────────────────────────────{Styler.RESET}")
