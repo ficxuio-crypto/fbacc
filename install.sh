@@ -6,7 +6,7 @@ if [ -z "$BASH_VERSION" ]; then
     fi
 fi
 # ==============================================================================
-# Universal Auto-Setup & Real-Time Smart Dashboard for fbacc
+# Universal Auto-Setup & Real-Time Animated Smart Dashboard for fbacc
 # Supported Platforms: Termux (Android aarch64/arm), Linux (Debian, Ubuntu, Arch, Fedora), macOS
 # ==============================================================================
 
@@ -44,7 +44,7 @@ get_elapsed() {
     printf "%02d:%02d" "$MINS" "$SECS"
 }
 
-# Real-Time Dashboard Renderer (Zero Spam, In-Place Updates)
+# Clear and home cursor for flicker-free in-place updating
 render_dashboard() {
     STEP_NUM="$1"
     PROGRESS_BAR="$2"
@@ -61,7 +61,7 @@ render_dashboard() {
 
     ELAPSED=$(get_elapsed)
 
-    clear 2>/dev/null || true
+    echo -ne "\033[H" 2>/dev/null || clear 2>/dev/null || true
     echo -e "${C_CYAN}${C_BOLD}"
     echo "   ╔═════════════════════════════════════════════════════════════════╗"
     echo "   ║          EYDHM ENTERPRISE AUTO-SETUP · SMART DASHBOARD          ║"
@@ -77,10 +77,58 @@ render_dashboard() {
     echo -e "   $STATUS_5"
     echo ""
     echo -e "   ${C_GRAY}─────────────────────────────────────────────────────────────────${C_RESET}"
-    echo -e "   ${C_BOLD}${C_CYAN}[► PROCESSING]${C_RESET} ${C_WHITE}${ACTIVE_TASK}${C_RESET}"
-    echo -e "   ${C_BOLD}${C_GRAY}[· UP NEXT   ]${C_RESET} ${C_GRAY}${UP_NEXT}${C_RESET}"
+    echo -e "   ${C_BOLD}${C_CYAN}[► PROCESSING]${C_RESET} ${ACTIVE_TASK}                                  "
+    echo -e "   ${C_BOLD}${C_GRAY}[· UP NEXT   ]${C_RESET} ${C_GRAY}${UP_NEXT}${C_RESET}                                  "
     echo ""
 }
+
+# Dynamic Worker Runner with Live Animated Spinner & Activity Feed
+run_step_with_spinner() {
+    CMD="$1"
+    STEP_NUM="$2"
+    PROGRESS_BAR="$3"
+    PROGRESS_PCT="$4"
+    EST_TIME="$5"
+    STATUS_1="$6"
+    STATUS_2="$7"
+    STATUS_3="$8"
+    STATUS_4="$9"
+    STATUS_5="${10}"
+    ACTIVE_TITLE="${11}"
+    UP_NEXT="${12}"
+
+    ( eval "$CMD" ) >> "$SETUP_LOG" 2>&1 &
+    CMD_PID=$!
+
+    SPIN_CHARS="⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    IDX=0
+
+    echo -ne "\033[?25l" 2>/dev/null || true
+
+    while kill -0 $CMD_PID 2>/dev/null; do
+        C=${SPIN_CHARS:IDX%10:1}
+        IDX=$((IDX + 1))
+
+        # Extract live activity snippet from log
+        LOG_LINE=$(tail -n 25 "$SETUP_LOG" 2>/dev/null | grep -E "([0-9]+%|Get:|Unpack|Setting up|Cloning|Resolving|fetch|install|Collecting)" | tail -n 1 | tr -d '\r' | cut -c 1-48 || echo "")
+        if [ -z "$LOG_LINE" ]; then
+            LOG_LINE="Working..."
+        fi
+
+        render_dashboard "$STEP_NUM" "$PROGRESS_BAR" "$PROGRESS_PCT" "$EST_TIME" \
+          "$STATUS_1" "$STATUS_2" "$STATUS_3" "$STATUS_4" "$STATUS_5" \
+          "${C_YELLOW}${C}${C_RESET} ${C_WHITE}${ACTIVE_TITLE}${C_RESET} ${C_GRAY}(${LOG_LINE})${C_RESET}" \
+          "$UP_NEXT"
+
+        sleep 0.25
+    done
+
+    wait $CMD_PID || true
+    echo -ne "\033[?25h" 2>/dev/null || true
+}
+
+# Clear screen once at startup
+clear 2>/dev/null || true
 
 # ------------------------------------------------------------------------------
 # STEP 1: Platform & Architecture Inspection
@@ -102,43 +150,57 @@ else
     OS_TYPE="linux"
 fi
 
-render_dashboard "1" "[████░░░░░░░░░░░░░░░░]" "20%" "~15s" \
+render_dashboard "1" "[████░░░░░░░░░░░░░░░░]" "20%" "~25s" \
   "${C_CYAN}${C_BOLD}[►] 1/5 Platform & Hardware Inspection ........ [ ACTIVE  ]${C_RESET}" \
   "${C_GRAY}[·] 2/5 Core System Binaries Bootstrap ........ [ PENDING ]${C_RESET}" \
   "${C_GRAY}[·] 3/5 Codebase Synchronization & Unpack ..... [ PENDING ]${C_RESET}" \
   "${C_GRAY}[·] 4/5 Smart Doctor & Python Dependencies .... [ PENDING ]${C_RESET}" \
   "${C_GRAY}[·] 5/5 Global CLI Command Registration ....... [ PENDING ]${C_RESET}" \
-  "Probing OS: ${OS_TYPE} (${ARCH})..." \
+  "Probing hardware: ${OS_TYPE} (${ARCH})..." \
   "Core toolchain verification (python, git, curl, tar)"
 
-sleep 0.4
+sleep 0.5
 
 # ------------------------------------------------------------------------------
 # STEP 2: Native Package Management & Critical Toolchain
 # ------------------------------------------------------------------------------
-render_dashboard "2" "[████████░░░░░░░░░░░░]" "40%" "~12s" \
-  "${C_GREEN}[✓] 1/5 Platform & Hardware Inspection ........ [ ${OS_TYPE} ${ARCH} ]${C_RESET}" \
-  "${C_CYAN}${C_BOLD}[►] 2/5 Core System Binaries Bootstrap ........ [ ACTIVE  ]${C_RESET}" \
-  "${C_GRAY}[·] 3/5 Codebase Synchronization & Unpack ..... [ PENDING ]${C_RESET}" \
-  "${C_GRAY}[·] 4/5 Smart Doctor & Python Dependencies .... [ PENDING ]${C_RESET}" \
-  "${C_GRAY}[·] 5/5 Global CLI Command Registration ....... [ PENDING ]${C_RESET}" \
-  "Installing missing system packages quietly..." \
-  "Repository retrieval (Git clone / HTTP archive stream)"
-
 case "$OS_TYPE" in
     termux)
+        # Phase 2A: Core tools from main repo (fast: ~2s)
         MISSING_CORE=""
         for p in python git curl wget tar binutils; do
             if ! command -v "$p" >/dev/null 2>&1; then MISSING_CORE="$MISSING_CORE $p"; fi
         done
+
         if [ -n "$MISSING_CORE" ]; then
-            pkg install -y $MISSING_CORE >> "$SETUP_LOG" 2>&1 || apt-get install -y $MISSING_CORE >> "$SETUP_LOG" 2>&1 || true
+            run_step_with_spinner "pkg install -y $MISSING_CORE || apt-get install -y $MISSING_CORE" \
+              "2" "[██████░░░░░░░░░░░░░░]" "30%" "~20s" \
+              "${C_GREEN}[✓] 1/5 Platform & Hardware Inspection ........ [ ${OS_TYPE} ${ARCH} ]${C_RESET}" \
+              "${C_CYAN}${C_BOLD}[►] 2/5 Core System Binaries Bootstrap ........ [ ACTIVE  ]${C_RESET}" \
+              "${C_GRAY}[·] 3/5 Codebase Synchronization & Unpack ..... [ PENDING ]${C_RESET}" \
+              "${C_GRAY}[·] 4/5 Smart Doctor & Python Dependencies .... [ PENDING ]${C_RESET}" \
+              "${C_GRAY}[·] 5/5 Global CLI Command Registration ....... [ PENDING ]${C_RESET}" \
+              "Installing core packages: ${MISSING_CORE}" \
+              "Checking Chromium & Tesseract OCR"
         fi
 
-        # Aux repos and packages
-        if ! command -v tesseract >/dev/null 2>&1 || (! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/null 2>&1 && [ ! -f "/data/data/com.termux/files/usr/bin/chromium-browser" ]); then
-            pkg install -y tur-repo x11-repo >> "$SETUP_LOG" 2>&1 || true
-            pkg install -y tesseract chromium >> "$SETUP_LOG" 2>&1 || true
+        # Phase 2B: Extended packages (Chromium & Tesseract)
+        NEED_EXT=""
+        if ! command -v tesseract >/dev/null 2>&1; then NEED_EXT="$NEED_EXT tesseract"; fi
+        if ! command -v chromium >/dev/null 2>&1 && ! command -v chromium-browser >/dev/null 2>&1 && [ ! -f "/data/data/com.termux/files/usr/bin/chromium-browser" ]; then
+            NEED_EXT="$NEED_EXT chromium"
+        fi
+
+        if [ -n "$NEED_EXT" ]; then
+            run_step_with_spinner "pkg install -y tur-repo x11-repo && pkg install -y $NEED_EXT" \
+              "2" "[████████░░░░░░░░░░░░]" "40%" "~18s" \
+              "${C_GREEN}[✓] 1/5 Platform & Hardware Inspection ........ [ ${OS_TYPE} ${ARCH} ]${C_RESET}" \
+              "${C_CYAN}${C_BOLD}[►] 2/5 Core System Binaries Bootstrap ........ [ ACTIVE  ]${C_RESET}" \
+              "${C_GRAY}[·] 3/5 Codebase Synchronization & Unpack ..... [ PENDING ]${C_RESET}" \
+              "${C_GRAY}[·] 4/5 Smart Doctor & Python Dependencies .... [ PENDING ]${C_RESET}" \
+              "${C_GRAY}[·] 5/5 Global CLI Command Registration ....... [ PENDING ]${C_RESET}" \
+              "Downloading Chromium & OCR (~120MB)" \
+              "Codebase Synchronization (Git / HTTP Archive)"
         fi
         ;;
 
@@ -155,8 +217,15 @@ case "$OS_TYPE" in
             MISSING_PKGS="$MISSING_PKGS chromium-browser xvfb"
         fi
         if [ -n "$MISSING_PKGS" ]; then
-            $SUDO apt update -y >> "$SETUP_LOG" 2>&1 || true
-            $SUDO apt install -y $MISSING_PKGS >> "$SETUP_LOG" 2>&1 || true
+            run_step_with_spinner "$SUDO apt update -y && $SUDO apt install -y $MISSING_PKGS" \
+              "2" "[████████░░░░░░░░░░░░]" "40%" "~15s" \
+              "${C_GREEN}[✓] 1/5 Platform & Hardware Inspection ........ [ ${OS_TYPE} ${ARCH} ]${C_RESET}" \
+              "${C_CYAN}${C_BOLD}[►] 2/5 Core System Binaries Bootstrap ........ [ ACTIVE  ]${C_RESET}" \
+              "${C_GRAY}[·] 3/5 Codebase Synchronization & Unpack ..... [ PENDING ]${C_RESET}" \
+              "${C_GRAY}[·] 4/5 Smart Doctor & Python Dependencies .... [ PENDING ]${C_RESET}" \
+              "${C_GRAY}[·] 5/5 Global CLI Command Registration ....... [ PENDING ]${C_RESET}" \
+              "Installing system packages via apt" \
+              "Codebase Synchronization (Git / HTTP Archive)"
         fi
         ;;
 
@@ -173,7 +242,15 @@ case "$OS_TYPE" in
             MISSING_PKGS="$MISSING_PKGS chromium xorg-server-xvfb"
         fi
         if [ -n "$MISSING_PKGS" ]; then
-            $SUDO pacman -Sy --noconfirm $MISSING_PKGS >> "$SETUP_LOG" 2>&1 || true
+            run_step_with_spinner "$SUDO pacman -Sy --noconfirm $MISSING_PKGS" \
+              "2" "[████████░░░░░░░░░░░░]" "40%" "~15s" \
+              "${C_GREEN}[✓] 1/5 Platform & Hardware Inspection ........ [ ${OS_TYPE} ${ARCH} ]${C_RESET}" \
+              "${C_CYAN}${C_BOLD}[►] 2/5 Core System Binaries Bootstrap ........ [ ACTIVE  ]${C_RESET}" \
+              "${C_GRAY}[·] 3/5 Codebase Synchronization & Unpack ..... [ PENDING ]${C_RESET}" \
+              "${C_GRAY}[·] 4/5 Smart Doctor & Python Dependencies .... [ PENDING ]${C_RESET}" \
+              "${C_GRAY}[·] 5/5 Global CLI Command Registration ....... [ PENDING ]${C_RESET}" \
+              "Installing Arch packages via pacman" \
+              "Codebase Synchronization (Git / HTTP Archive)"
         fi
         ;;
 
@@ -190,7 +267,15 @@ case "$OS_TYPE" in
             MISSING_PKGS="$MISSING_PKGS chromium xorg-x11-server-Xvfb"
         fi
         if [ -n "$MISSING_PKGS" ]; then
-            $SUDO dnf install -y $MISSING_PKGS >> "$SETUP_LOG" 2>&1 || true
+            run_step_with_spinner "$SUDO dnf install -y $MISSING_PKGS" \
+              "2" "[████████░░░░░░░░░░░░]" "40%" "~15s" \
+              "${C_GREEN}[✓] 1/5 Platform & Hardware Inspection ........ [ ${OS_TYPE} ${ARCH} ]${C_RESET}" \
+              "${C_CYAN}${C_BOLD}[►] 2/5 Core System Binaries Bootstrap ........ [ ACTIVE  ]${C_RESET}" \
+              "${C_GRAY}[·] 3/5 Codebase Synchronization & Unpack ..... [ PENDING ]${C_RESET}" \
+              "${C_GRAY}[·] 4/5 Smart Doctor & Python Dependencies .... [ PENDING ]${C_RESET}" \
+              "${C_GRAY}[·] 5/5 Global CLI Command Registration ....... [ PENDING ]${C_RESET}" \
+              "Installing Fedora packages via dnf" \
+              "Codebase Synchronization (Git / HTTP Archive)"
         fi
         ;;
 
@@ -203,7 +288,15 @@ case "$OS_TYPE" in
             if ! command -v "$p" >/dev/null 2>&1; then MISSING_PKGS="$MISSING_PKGS $p"; fi
         done
         if [ -n "$MISSING_PKGS" ]; then
-            brew install $MISSING_PKGS >> "$SETUP_LOG" 2>&1 || true
+            run_step_with_spinner "brew install $MISSING_PKGS" \
+              "2" "[████████░░░░░░░░░░░░]" "40%" "~15s" \
+              "${C_GREEN}[✓] 1/5 Platform & Hardware Inspection ........ [ ${OS_TYPE} ${ARCH} ]${C_RESET}" \
+              "${C_CYAN}${C_BOLD}[►] 2/5 Core System Binaries Bootstrap ........ [ ACTIVE  ]${C_RESET}" \
+              "${C_GRAY}[·] 3/5 Codebase Synchronization & Unpack ..... [ PENDING ]${C_RESET}" \
+              "${C_GRAY}[·] 4/5 Smart Doctor & Python Dependencies .... [ PENDING ]${C_RESET}" \
+              "${C_GRAY}[·] 5/5 Global CLI Command Registration ....... [ PENDING ]${C_RESET}" \
+              "Installing Homebrew packages" \
+              "Codebase Synchronization (Git / HTTP Archive)"
         fi
         ;;
 esac
@@ -211,15 +304,6 @@ esac
 # ------------------------------------------------------------------------------
 # STEP 3: Source Repository Synchronization (3-Tier Redundant Retrieval)
 # ------------------------------------------------------------------------------
-render_dashboard "3" "[████████████░░░░░░░░]" "60%" "~8s" \
-  "${C_GREEN}[✓] 1/5 Platform & Hardware Inspection ........ [ ${OS_TYPE} ${ARCH} ]${C_RESET}" \
-  "${C_GREEN}[✓] 2/5 Core System Binaries Bootstrap ........ [ VERIFIED ]${C_RESET}" \
-  "${C_CYAN}${C_BOLD}[►] 3/5 Codebase Synchronization & Unpack ..... [ ACTIVE  ]${C_RESET}" \
-  "${C_GRAY}[·] 4/5 Smart Doctor & Python Dependencies .... [ PENDING ]${C_RESET}" \
-  "${C_GRAY}[·] 5/5 Global CLI Command Registration ....... [ PENDING ]${C_RESET}" \
-  "Synchronizing codebase into ${INSTALL_DIR}..." \
-  "Smart Doctor diagnostic & wheel verification"
-
 CURRENT_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 
 if [ -f "${CURRENT_SCRIPT_DIR}/fbacc.py" ] && [ -f "${CURRENT_SCRIPT_DIR}/doctor.py" ]; then
@@ -228,33 +312,36 @@ else
     TARGET_DIR="${INSTALL_DIR}"
     REPO_URL="${FBACC_REPO_URL:-$REPO_DEFAULT_URL}"
 
-    CLONED=false
-    if [ -d "${TARGET_DIR}/.git" ]; then
-        (cd "$TARGET_DIR" && git pull origin main >> "$SETUP_LOG" 2>&1 || true)
-        if [ -f "${TARGET_DIR}/fbacc.py" ]; then CLONED=true; fi
-    elif command -v git >/dev/null 2>&1; then
-        rm -rf "$TARGET_DIR" 2>/dev/null || true
-        if git clone --depth 1 "$REPO_URL" "$TARGET_DIR" >> "$SETUP_LOG" 2>&1; then
-            if [ -f "${TARGET_DIR}/fbacc.py" ]; then CLONED=true; fi
+    CLONE_CMD="
+        CLONED=false
+        if [ -d \"${TARGET_DIR}/.git\" ]; then
+            (cd \"$TARGET_DIR\" && git pull origin main) && CLONED=true
+        elif command -v git >/dev/null 2>&1; then
+            rm -rf \"$TARGET_DIR\" 2>/dev/null || true
+            git clone --depth 1 \"$REPO_URL\" \"$TARGET_DIR\" && CLONED=true
         fi
-    fi
+        if [ \"\$CLONED\" != \"true\" ] || [ ! -f \"${TARGET_DIR}/fbacc.py\" ]; then
+            mkdir -p \"$TARGET_DIR\"
+            (curl -fsSL \"$REPO_ARCHIVE_URL\" | tar -xz --strip-components=1 -C \"$TARGET_DIR\") || \
+            (wget -qO- \"$REPO_ARCHIVE_URL\" | tar -xz --strip-components=1 -C \"$TARGET_DIR\") || true
+        fi
+        if [ ! -f \"${TARGET_DIR}/fbacc.py\" ]; then
+            mkdir -p \"$TARGET_DIR\"
+            for f in fbacc.py fbacc_pro.py doctor.py requirements.txt settings.json install.sh; do
+                curl -fsSL \"${REPO_RAW_URL}/\${f}\" -o \"${TARGET_DIR}/\${f}\" 2>/dev/null || true
+            done
+        fi
+    "
 
-    # Fallback Tier 2: HTTP Tarball stream
-    if [ "$CLONED" != "true" ] || [ ! -f "${TARGET_DIR}/fbacc.py" ]; then
-        mkdir -p "$TARGET_DIR"
-        (curl -fsSL "$REPO_ARCHIVE_URL" 2>/dev/null | tar -xz --strip-components=1 -C "$TARGET_DIR" 2>/dev/null) || \
-        (wget -qO- "$REPO_ARCHIVE_URL" 2>/dev/null | tar -xz --strip-components=1 -C "$TARGET_DIR" 2>/dev/null) || true
-        if [ -f "${TARGET_DIR}/fbacc.py" ]; then CLONED=true; fi
-    fi
-
-    # Fallback Tier 3: Direct Raw CDN files
-    if [ "$CLONED" != "true" ] || [ ! -f "${TARGET_DIR}/fbacc.py" ]; then
-        mkdir -p "$TARGET_DIR"
-        for fname in fbacc.py fbacc_pro.py doctor.py requirements.txt settings.json install.sh; do
-            curl -fsSL "${REPO_RAW_URL}/${fname}" -o "${TARGET_DIR}/${fname}" >> "$SETUP_LOG" 2>&1 || \
-            wget -q "${REPO_RAW_URL}/${fname}" -O "${TARGET_DIR}/${fname}" >> "$SETUP_LOG" 2>&1 || true
-        done
-    fi
+    run_step_with_spinner "$CLONE_CMD" \
+      "3" "[████████████░░░░░░░░]" "60%" "~10s" \
+      "${C_GREEN}[✓] 1/5 Platform & Hardware Inspection ........ [ ${OS_TYPE} ${ARCH} ]${C_RESET}" \
+      "${C_GREEN}[✓] 2/5 Core System Binaries Bootstrap ........ [ VERIFIED ]${C_RESET}" \
+      "${C_CYAN}${C_BOLD}[►] 3/5 Codebase Synchronization & Unpack ..... [ ACTIVE  ]${C_RESET}" \
+      "${C_GRAY}[·] 4/5 Smart Doctor & Python Dependencies .... [ PENDING ]${C_RESET}" \
+      "${C_GRAY}[·] 5/5 Global CLI Command Registration ....... [ PENDING ]${C_RESET}" \
+      "Synchronizing repository into ${INSTALL_DIR}" \
+      "Smart Doctor diagnostic & wheel verification"
 
     if [ ! -f "${TARGET_DIR}/fbacc.py" ] || [ ! -s "${TARGET_DIR}/fbacc.py" ]; then
         clear 2>/dev/null || true
@@ -270,15 +357,6 @@ cd "$TARGET_DIR"
 # ------------------------------------------------------------------------------
 # STEP 4: Python Runtime & Smart Doctor Auto-Healer
 # ------------------------------------------------------------------------------
-render_dashboard "4" "[████████████████░░░░]" "80%" "~4s" \
-  "${C_GREEN}[✓] 1/5 Platform & Hardware Inspection ........ [ ${OS_TYPE} ${ARCH} ]${C_RESET}" \
-  "${C_GREEN}[✓] 2/5 Core System Binaries Bootstrap ........ [ VERIFIED ]${C_RESET}" \
-  "${C_GREEN}[✓] 3/5 Codebase Synchronization & Unpack ..... [ VERIFIED ]${C_RESET}" \
-  "${C_CYAN}${C_BOLD}[►] 4/5 Smart Doctor & Python Dependencies .... [ ACTIVE  ]${C_RESET}" \
-  "${C_GRAY}[·] 5/5 Global CLI Command Registration ....... [ PENDING ]${C_RESET}" \
-  "Running Smart Doctor diagnostics & auto-repair..." \
-  "Configuring global 'fbacc' CLI launcher shortcut"
-
 PYTHON_BIN=""
 for py in python3 python; do
     if command -v "$py" >/dev/null 2>&1; then
@@ -290,37 +368,32 @@ for py in python3 python; do
 done
 
 if [ -z "$PYTHON_BIN" ]; then
-    if [ "$OS_TYPE" = "termux" ]; then
-        pkg install -y python >> "$SETUP_LOG" 2>&1 || true
-    elif [ "$OS_TYPE" = "debian" ]; then
-        $SUDO apt update -y >> "$SETUP_LOG" 2>&1 || true
-        $SUDO apt install -y python3 python3-pip >> "$SETUP_LOG" 2>&1 || true
-    fi
     PYTHON_BIN="python3"
 fi
 
-# Ensure pip is present
-$PYTHON_BIN -m pip --version >> "$SETUP_LOG" 2>&1 || {
-    $PYTHON_BIN -m ensurepip --default-pip >> "$SETUP_LOG" 2>&1 || true
-}
+DOCTOR_CMD="
+    \$PYTHON_BIN -m pip --version >/dev/null 2>&1 || \$PYTHON_BIN -m ensurepip --default-pip >/dev/null 2>&1 || true
+    if [ -f \"doctor.py\" ]; then
+        \$PYTHON_BIN doctor.py
+    else
+        \$PYTHON_BIN -m pip install -r requirements.txt --break-system-packages --quiet 2>/dev/null || \
+        \$PYTHON_BIN -m pip install -r requirements.txt --quiet 2>/dev/null || true
+    fi
+"
 
-# Run doctor cleanly
-if [ -f "doctor.py" ]; then
-    $PYTHON_BIN doctor.py >> "$SETUP_LOG" 2>&1 || true
-fi
+run_step_with_spinner "$DOCTOR_CMD" \
+  "4" "[████████████████░░░░]" "80%" "~5s" \
+  "${C_GREEN}[✓] 1/5 Platform & Hardware Inspection ........ [ ${OS_TYPE} ${ARCH} ]${C_RESET}" \
+  "${C_GREEN}[✓] 2/5 Core System Binaries Bootstrap ........ [ VERIFIED ]${C_RESET}" \
+  "${C_GREEN}[✓] 3/5 Codebase Synchronization & Unpack ..... [ VERIFIED ]${C_RESET}" \
+  "${C_CYAN}${C_BOLD}[►] 4/5 Smart Doctor & Python Dependencies .... [ ACTIVE  ]${C_RESET}" \
+  "${C_GRAY}[·] 5/5 Global CLI Command Registration ....... [ PENDING ]${C_RESET}" \
+  "Verifying Python dependencies via Smart Doctor" \
+  "Configuring global 'fbacc' CLI launcher shortcut"
 
 # ------------------------------------------------------------------------------
 # STEP 5: Binary Symlink & Global CLI Command Integration
 # ------------------------------------------------------------------------------
-render_dashboard "5" "[████████████████████]" "100%" "00:00" \
-  "${C_GREEN}[✓] 1/5 Platform & Hardware Inspection ........ [ ${OS_TYPE} ${ARCH} ]${C_RESET}" \
-  "${C_GREEN}[✓] 2/5 Core System Binaries Bootstrap ........ [ VERIFIED ]${C_RESET}" \
-  "${C_GREEN}[✓] 3/5 Codebase Synchronization & Unpack ..... [ VERIFIED ]${C_RESET}" \
-  "${C_GREEN}[✓] 4/5 Smart Doctor & Python Dependencies .... [ 100% OK  ]${C_RESET}" \
-  "${C_CYAN}${C_BOLD}[►] 5/5 Global CLI Command Registration ....... [ ACTIVE  ]${C_RESET}" \
-  "Registering global command 'fbacc' in system PATH..." \
-  "Finishing setup"
-
 chmod +x fbacc.py fbacc_pro.py doctor.py install.sh 2>/dev/null || true
 
 BIN_DIR=""
@@ -365,7 +438,7 @@ TOTAL_TIME=$(get_elapsed)
 # ------------------------------------------------------------------------------
 # FINAL COMPLETION DASHBOARD
 # ------------------------------------------------------------------------------
-clear 2>/dev/null || true
+echo -ne "\033[H" 2>/dev/null || clear 2>/dev/null || true
 echo -e "${C_GREEN}${C_BOLD}"
 echo "   ╔═════════════════════════════════════════════════════════════════╗"
 echo "   ║          EYDHM ENTERPRISE AUTO-SETUP · COMPLETED                ║"
